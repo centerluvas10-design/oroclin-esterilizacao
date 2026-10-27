@@ -807,6 +807,7 @@ function regPdf(){ const r = regRecords(); if (!r.length) return toast("Nenhuma 
 
 /* ======================= CADASTROS ======================= */
 function mountCadastros(){
+  S.editCad = null;
   $("#main").innerHTML = `<div class="stack">
     <div><h1>Cadastros</h1><p class="lede">Equipamentos, equipe e kits usados nas cargas. Itens desativados somem das listas de seleção, mas continuam nos registros antigos.</p></div>
     <section class="panel stack"><h2>Autoclaves</h2><div id="lsEquip"></div>
@@ -815,23 +816,28 @@ function mountCadastros(){
         <label class="f">Nome de identificação<input id="eqNome" placeholder="Ex.: Autoclave 1"></label>
         <label class="f">Marca / modelo<input id="eqModelo"></label>
         <label class="f">Nº de série / volume<input id="eqSerie" placeholder="Ex.: 12345 · 21 L"></label>
-        <div><button class="primary" type="submit">Adicionar autoclave</button></div></form></section>
+        <div class="row"><button class="primary" type="submit">Adicionar autoclave</button><button type="button" data-cancel-edit hidden>Cancelar</button></div></form></section>
     <section class="panel stack"><h2>Equipe</h2><p class="hint" style="margin:0">Quem prepara pacotes, opera a autoclave ou registra o uso. O nome sai na etiqueta como responsável pelo preparo <span class="art">art. 81, II</span></p><div id="lsPes"></div>
       <form class="grid g3" id="fmPes" novalidate style="align-items:end">
         <label class="f">Nome (como sairá na etiqueta)<input id="pNome" placeholder="Ex.: Ana Souza"></label>
         <label class="f">Função<select id="pFun"><option>ASB</option><option>TSB</option><option>Cirurgiã(o)-dentista</option><option>Responsável técnico</option><option>Outro</option></select></label>
-        <div><button class="primary" type="submit">Adicionar pessoa</button></div></form></section>
+        <div class="row"><button class="primary" type="submit">Adicionar pessoa</button><button type="button" data-cancel-edit hidden>Cancelar</button></div></form></section>
     <section class="panel stack"><h2>Kits e pacotes padrão</h2><div id="lsKits"></div>
       <form class="grid g4" id="fmKit" novalidate style="align-items:end">
         <label class="f">Nome do kit<input id="kNome" placeholder="Ex.: Kit clínico"></label>
         <label class="f">Itens<input id="kItens" placeholder="Espelho, sonda, pinça"></label>
         <label class="f">Embalagem padrão<select id="kEmb">${EMBALAGENS.map(x=>`<option>${esc(x)}</option>`).join("")}</select></label>
-        <div><button class="primary" type="submit">Adicionar kit</button></div></form></section>
+        <div class="row"><button class="primary" type="submit">Adicionar kit</button><button type="button" data-cancel-edit hidden>Cancelar</button></div></form></section>
     <section class="panel stack"><h2>Validade da esterilização</h2>
       <p class="hint" style="margin:0">Sem validação científica própria, o prazo é de 6 meses a partir do processamento, com embalagem íntegra e armazenamento adequado <span class="art">art. 82 §1º</span>. Registre o prazo no POP.</p>
       <form id="fmVal" class="row" novalidate style="align-items:flex-end"><label class="f" style="width:200px">Validade (meses)<input id="cfVal" type="number" min="1" max="12" value="${esc(S.config.validadeMeses||6)}"></label><button type="submit">Salvar prazo</button></form></section>
   </div>`;
-  const add = (col, body, msg) => write(()=>api("set",{col, id:uid(), dados:{...body, ativo:true, criadoEm:new Date().toISOString()}}), msg);
+  const add = (col, body, msg) => {
+    const ed = S.editCad;
+    if (ed && ed.col === col) return write(()=>api("update",{col, id:ed.id, dados:{...body, editadoEm:new Date().toISOString()}}), "Alterações salvas.")
+      .then(ok => { if (ok) { S.editCad = null; mountCadastros(); } return false; });
+    return write(()=>api("set",{col, id:uid(), dados:{...body, ativo:true, criadoEm:new Date().toISOString()}}), msg);
+  };
   $("#fmEquip").addEventListener("submit", async e=>{ e.preventDefault(); const n = $("#eqNome").value.trim(); if(!n) return toast("Dê um nome à autoclave.");
     if (await add("equipamentos",{nome:n, modelo:$("#eqModelo").value.trim(), serie:$("#eqSerie").value.trim(), vacuo:false},"Autoclave adicionada.")) e.target.reset(); });
   $("#fmPes").addEventListener("submit", async e=>{ e.preventDefault(); const n = $("#pNome").value.trim(); if(!n) return toast("Informe o nome.");
@@ -842,17 +848,38 @@ function mountCadastros(){
     await write(()=>api("set",{col:"config", id:"geral", dados:{...S.config, validadeMeses:v}}), `Prazo de validade: ${v} meses (vale para novas cargas).`); });
   updCadastros();
 }
+const CAD_FORM = {
+  equipamentos: { form:"#fmEquip", campos:{eqNome:"nome", eqModelo:"modelo", eqSerie:"serie"}, rotulo:"autoclave" },
+  pessoas:      { form:"#fmPes",   campos:{pNome:"nome", pFun:"funcao"}, rotulo:"pessoa" },
+  kits:         { form:"#fmKit",   campos:{kNome:"nome", kItens:"itens", kEmb:"embalagem"}, rotulo:"kit" }
+};
+function editarCadastro(col, id){
+  const arr = {equipamentos:S.equip, pessoas:S.pessoas, kits:S.kits}[col]; const x = arr && arr.find(y=>y.id===id); const cf = CAD_FORM[col];
+  if (!x || !cf) return;
+  if (S.editCad) mountCadastros();
+  S.editCad = {col, id};
+  const f = $(cf.form);
+  Object.entries(cf.campos).forEach(([el, k]) => { const i = $("#"+el); if (!i) return;
+    if (i.tagName === "SELECT" && x[k] && ![...i.options].some(o=>o.value===x[k])) i.add(new Option(x[k], x[k]));
+    i.value = x[k] || ""; });
+  f.querySelector("button[type=submit]").textContent = "Salvar alterações";
+  f.querySelector("[data-cancel-edit]").hidden = false;
+  f.scrollIntoView({behavior:"smooth", block:"center"}); $("#"+Object.keys(cf.campos)[0]).focus();
+  toast(`Editando ${cf.rotulo}: ${x.nome}. Cargas já registradas não mudam.`);
+}
 function updCadastros(){
   if (!$("#lsEquip")) return;
-  const list = (arr, col, cols, empty) => arr.length ? `<div class="tablewrap"><table><tbody>${arr.map(x=>`<tr><td>${cols(x)}</td><td class="num" style="white-space:nowrap">${x.ativo===false?`<span class="pill neutral">Inativo</span> `:""}<button class="small" data-toggle="${col}/${esc(x.id)}">${x.ativo===false?"Reativar":"Desativar"}</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="muted" style="margin:0">${empty}</p>`;
+  const list = (arr, col, cols, empty) => arr.length ? `<div class="tablewrap"><table><tbody>${arr.map(x=>`<tr><td>${cols(x)}</td><td class="num" style="white-space:nowrap">${x.ativo===false?`<span class="pill neutral">Inativo</span> `:""}<button class="small" data-edit="${col}/${esc(x.id)}">Editar</button> <button class="small" data-toggle="${col}/${esc(x.id)}">${x.ativo===false?"Reativar":"Desativar"}</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="muted" style="margin:0">${empty}</p>`;
   $("#lsEquip").innerHTML = list(S.equip,"equipamentos",x=>`<b>${esc(x.nome)}</b> <span class="muted">${esc([x.modelo,x.serie].filter(Boolean).join(" · "))}</span> ${x.vacuo?'<span class="pill info">Vácuo</span>':""}`,"Nenhuma autoclave cadastrada.");
   $("#lsPes").innerHTML = list(S.pessoas,"pessoas",x=>`<b>${esc(x.nome)}</b> <span class="muted">${esc(x.funcao||"")}</span>`,"Ninguém cadastrado ainda.");
-  $("#lsKits").innerHTML = list(S.kits,"kits",x=>`<b>${esc(x.nome)}</b><div class="hint">${esc(x.itens||"")} · ${esc(x.embalagem||"")}</div>`,"Nenhum kit cadastrado.");
+  $("#lsKits").innerHTML = list(S.kits,"kits",x=>`<b>${esc(x.nome)}</b><div class="hint">${esc([x.itens,x.embalagem].filter(Boolean).join(" · "))}</div>`,"Nenhum kit cadastrado.");
 }
 
 /* ---------- ações globais ---------- */
 document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-act],[data-open],[data-code],[data-go],[data-toggle]"); if (!t) return;
+  const t = e.target.closest("[data-act],[data-open],[data-code],[data-go],[data-toggle],[data-edit],[data-cancel-edit]"); if (!t) return;
+  if (t.hasAttribute("data-cancel-edit")){ S.editCad = null; mountCadastros(); return; }
+  if (t.dataset.edit){ editarCadastro(...t.dataset.edit.split("/")); return; }
   if (t.dataset.go){ route(t.dataset.go); return; }
   if (t.dataset.open){ S.cargaSel = t.dataset.open; S.editCarga = null; S.cicloOpen = false; route("cargas"); window.scrollTo(0,0); return; }
   if (t.dataset.code){ S.lookupCode = t.dataset.code; route("consulta"); window.scrollTo(0,0); return; }
