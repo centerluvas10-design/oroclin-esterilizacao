@@ -7,7 +7,13 @@
  *
  * Instalação: veja o README do repositório.
  * PIN: Configurações do projeto > Propriedades do script > PIN
+ * Fotos dos indicadores: pasta "Oroclin esterilização - fotos dos indicadores" no Drive desta conta,
+ * com uma subpasta por mês. O ID da pasta fica na propriedade PASTA_FOTOS.
  */
+
+const VERSAO = 2;
+const PASTA_FOTOS_NOME = "Oroclin esterilização - fotos dos indicadores";
+const TIPOS_FOTO = { integrador: "integrador", ib: "indicador-biologico" };
 
 const COLECOES = ["cargas", "equipamentos", "pessoas", "kits", "config"];
 
@@ -46,7 +52,14 @@ function configurar() {
       gravar("kits", k[0], { nome: k[1], itens: k[2], embalagem: "Papel grau cirúrgico", ativo: true, criadoEm: agora });
     });
   }
+  pastaFotos();
   Logger.log("Pronto. Agora troque o PIN em Propriedades do script e publique como App da Web.");
+}
+
+/** Rode UMA vez pelo editor depois de atualizar o código: pede a permissão do Drive e cria a pasta das fotos. */
+function autorizarFotos() {
+  const p = pastaFotos();
+  Logger.log("Pasta das fotos pronta: " + p.getName() + " (" + p.getUrl() + ")");
 }
 
 /* ---------------- entrada HTTP ---------------- */
@@ -64,7 +77,7 @@ function doPost(e) {
     return saida({ erro: "PIN incorreto.", codigo: "pin" });
   }
   try {
-    const leitura = { ping: 1, tudo: 1, get: 1, consulta: 1 };
+    const leitura = { ping: 1, tudo: 1, get: 1, consulta: 1, fotos: 1, foto: 1 }; // fotos não mexem na planilha: sem trava
     if (leitura[req.acao]) return saida({ resultado: executar(req) });
     const trava = LockService.getScriptLock();
     trava.waitLock(20000);
@@ -77,13 +90,15 @@ function doPost(e) {
 
 function executar(req) {
   switch (req.acao) {
-    case "ping": return { ok: true };
+    case "ping": return { ok: true, versao: VERSAO };
     case "tudo": return tudo(req.desde);
     case "get": validarColecao(req.col); return ler(req.col, req.id);
     case "consulta": return consultaCargas(req.de, req.ate);
     case "set": validarColecao(req.col); return gravar(req.col, req.id, req.dados);
     case "update": validarColecao(req.col); return atualizar(req.col, req.id, req.dados);
     case "novaCarga": return novaCarga(req.dados);
+    case "foto": return salvarFoto(req.dados);
+    case "fotos": return lerFotos(req.ids);
     default: throw erro("Ação desconhecida: " + req.acao, "invalid_argument");
   }
 }
@@ -96,6 +111,7 @@ function tudo(desde) {
   ["equipamentos", "pessoas", "kits"].forEach(function (c) { r[c] = lerTodos(c); });
   const cfg = ler("config", "geral");
   r.config = cfg ? cfg : {};
+  r.versao = VERSAO;
   const corte = desde || isoDias(-400);
   r.cargas = lerTodos("cargas").filter(function (c) {
     return c.data >= corte || c.status === "preparada" || c.status === "liberada_ib";
@@ -127,6 +143,55 @@ function novaCarga(dados) {
   dados.criadoEm = new Date().toISOString();
   gravar("cargas", lote, dados);
   return dados;
+}
+
+/* ---------------- fotos dos indicadores ---------------- */
+
+function pastaFotos() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty("PASTA_FOTOS");
+  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  const nova = DriveApp.createFolder(PASTA_FOTOS_NOME);
+  props.setProperty("PASTA_FOTOS", nova.getId());
+  return nova;
+}
+
+function pastaDoMes(mes) {
+  const raiz = pastaFotos();
+  const it = raiz.getFoldersByName(mes);
+  return it.hasNext() ? it.next() : raiz.createFolder(mes);
+}
+
+/** Grava a foto (JPEG já carimbado pelo sistema) e devolve o ID do arquivo no Drive. */
+function salvarFoto(d) {
+  d = d || {};
+  if (!/^L\d{8}-\d{2}$/.test(String(d.lote || ""))) throw erro("Lote inválido.", "invalid_argument");
+  if (!TIPOS_FOTO[d.tipo]) throw erro("Tipo de foto inválido.", "invalid_argument");
+  const m = /^data:image\/jpeg;base64,([A-Za-z0-9+\/=]+)$/.exec(String(d.dataUrl || ""));
+  if (!m) throw erro("Foto inválida.", "invalid_argument");
+  const bytes = Utilities.base64Decode(m[1]);
+  if (bytes.length > 4 * 1024 * 1024) throw erro("Foto grande demais.", "quota_exceeded");
+  const carimbo = Utilities.formatDate(new Date(), "America/Fortaleza", "yyyyMMdd-HHmmss");
+  const nome = d.lote + "_" + TIPOS_FOTO[d.tipo] + "_" + carimbo + ".jpg";
+  const mes = d.lote.slice(1, 5) + "-" + d.lote.slice(5, 7);
+  const arq = pastaDoMes(mes).createFile(Utilities.newBlob(bytes, "image/jpeg", nome));
+  arq.setDescription("Lote " + d.lote + " · " + d.tipo + " · enviada por " + String(d.por || "").slice(0, 80));
+  return { id: arq.getId(), nome: nome };
+}
+
+/** Devolve as fotos pedidas como data URL. Só entrega arquivos de dentro da pasta das fotos. */
+function lerFotos(ids) {
+  const raizId = pastaFotos().getId(), out = {};
+  (ids || []).slice(0, 10).forEach(function (id) {
+    id = String(id);
+    try {
+      const f = DriveApp.getFileById(id);
+      const mes = f.getParents();
+      const ok = mes.hasNext() && (function (p) { const r = p.getParents(); return r.hasNext() && r.next().getId() === raizId; })(mes.next());
+      out[id] = ok && !f.isTrashed() ? "data:image/jpeg;base64," + Utilities.base64Encode(f.getBlob().getBytes()) : null;
+    } catch (e) { out[id] = null; }
+  });
+  return out;
 }
 
 /* ---------------- armazenamento ---------------- */
@@ -223,8 +288,10 @@ function colunasLegiveis(col, d) {
   // cargas
   const ci = d.ciclo || {};
   const parametros = ci.temperatura != null ? ci.temperatura + " °C | " + ci.pressao + " " + (ci.pressaoUnid || "") + " | " + ci.tempo + " min" : "";
+  const fo = ci.fotos || {};
   const teste = ci.integrador ? "Integrador T" + ci.integrador.tipo + ": " + ci.integrador.resultado +
-    (ci.ib && ci.ib.usado ? " | IB: " + ci.ib.resultado + (ci.ib.loteIB ? " (lote " + ci.ib.loteIB + ")" : "") : "") : "";
+    (ci.ib && ci.ib.usado ? " | IB: " + ci.ib.resultado + (ci.ib.loteIB ? " (lote " + ci.ib.loteIB + ")" : "") : "") +
+    " | Fotos: " + [fo.integrador ? fo.integrador.nome : "sem foto do integrador", fo.ib ? fo.ib.nome : ""].filter(String).join(", ") : "";
   const pacotes = (d.pacotes || []).map(function (p) {
     const u = (d.usos || {})[p.codigo];
     return p.codigo + " " + p.kit + (u ? " → " + u.desfecho + (u.paciente ? " (" + u.paciente + ")" : "") : "");

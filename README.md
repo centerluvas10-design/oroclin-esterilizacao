@@ -92,6 +92,23 @@ Antes da primeira carga, cadastre a autoclave e a equipe na aba **Cadastros**.
 - As outras colunas (lote, datas, parâmetros, situação, pacotes) são uma cópia legível, refeita a cada gravação.
 - Nenhum registro é apagado pelo sistema: cargas e cadastros são **cancelados** ou **desativados**, e o histórico fica preservado.
 
+## Fotos dos indicadores
+
+Cada ciclo só é salvo com a **foto do integrador químico**. Quando o resultado do **indicador biológico** é lançado, o sistema também exige a foto das duas ampolas (testada e controle) e o **lote do IB**.
+
+- No celular, **Tirar foto** abre a câmera. **Anexar arquivo** serve para enviar uma foto já salva, pelo celular ou pelo computador.
+- Antes do envio, o sistema reduz a foto e grava nela uma faixa com lote, teste, resultado, data, hora e quem registrou.
+- As fotos ficam no Drive da conta da clínica, na pasta **"Oroclin esterilização - fotos dos indicadores"**, com uma subpasta por mês (`2026-10`, `2026-11`…). O nome do arquivo começa pelo lote.
+- O **livro do mês (PDF)** traz, para cada carga, o cabeçalho, a linha do registro e as fotos logo abaixo.
+- **Não apague nem mova as fotos dessa pasta.** O servidor só entrega fotos que estejam dentro dela, e o livro precisa delas por no mínimo 5 anos (art. 92).
+
+### Ao atualizar o servidor para a versão com fotos
+
+1. Cole o novo `Codigo.gs` no Apps Script e salve.
+2. No editor, escolha a função **`autorizarFotos`** e clique em **Executar**. O Google pede a permissão do Drive; autorize com a conta da clínica.
+3. Vá em **Implantar → Gerenciar implantações → editar (lápis) → Versão: Nova versão → Implantar**. A URL continua a mesma.
+4. Só depois publique o `index.html` novo. Se o sistema novo encontrar o servidor antigo, ele avisa e não deixa registrar ciclos.
+
 ## Dados de pacientes (LGPD)
 
 O registro de uso guarda o paciente em que o pacote foi usado. Prefira o **número do prontuário** em vez do nome. Assim a rastreabilidade fica completa e o nome continua só no sistema de gestão da clínica.

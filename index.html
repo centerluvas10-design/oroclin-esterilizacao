@@ -102,6 +102,13 @@ button.danger{color:var(--crit);border-color:var(--crit)}
 button.small{padding:4px 10px;font-size:13px}
 button.link{border:0;background:none;padding:0;color:var(--gold);text-decoration:underline;text-underline-offset:2px}
 button:disabled{opacity:.45;cursor:not-allowed}
+label.btn input[type=file]{display:none}
+.fotobox{border:1px dashed var(--line-strong);border-radius:var(--r);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.fotobox .prev{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.fotobox img,.thumbs img{width:150px;max-width:100%;height:auto;border-radius:4px;border:1px solid var(--line);display:block}
+.thumbs{display:flex;gap:12px;flex-wrap:wrap}
+.thumbs figure{margin:0;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.thumbs img{cursor:zoom-in} .thumbs img.big{width:min(100%,640px);cursor:zoom-out}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);font-weight:500;min-width:0}
 input,select,textarea{font:400 14.5px var(--f-body);color:var(--fg);background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;padding:8px 10px;width:100%;min-width:0}
@@ -170,7 +177,7 @@ legend{font:600 14px var(--f-display);padding:0 6px}
 <script>
 "use strict";
 /* ---------- estado ---------- */
-const S = { equip:[], pessoas:[], kits:[], cargas:[], config:{validadeMeses:6}, loaded:{}, view:"painel",
+const S = { fotoNova:{}, fotoCache:new Map(), servidorVersao:0, equip:[], pessoas:[], kits:[], cargas:[], config:{validadeMeses:6}, loaded:{}, view:"painel",
   cargaSel:null, editCarga:null, cicloOpen:false, lookupCode:null, lookupCarga:null, regMes:null, regEquip:"", regRows:null, cad:{} };
 /* >>> CONFIGURAÇÃO: cole aqui a URL do App da Web do Google Apps Script (termina em /exec) <<< */
 const API_URL = "https://script.google.com/macros/s/AKfycbzjkyz1UCYRD88l8FZAo9df-DTmj9GxfJdv45kJ7wFObz654Fv8a8HOyCREspGkCSum/exec";
@@ -283,7 +290,7 @@ async function sync(){
   try {
     const r = await api("tudo", {});
     S.equip = r.equipamentos || []; S.pessoas = r.pessoas || []; S.kits = r.kits || [];
-    S.cargas = sortCargas(r.cargas || []); S.config = {...S.config, ...(r.config || {})};
+    S.cargas = sortCargas(r.cargas || []); S.config = {...S.config, ...(r.config || {})}; S.servidorVersao = r.versao || 1;
     S.loaded.all = true; online = true; setBanner(""); refresh();
   } catch(e){
     if (e.code === "pin") return;
@@ -346,6 +353,8 @@ function updPainel(){
   if (!S.equip.length || !S.pessoas.length) alerts.push(["info", `<b>Comece pelos cadastros.</b> Registre a autoclave e a equipe que prepara e opera os ciclos.`, `<button class="small" data-go="cadastros">Abrir cadastros</button>`]);
   const pend = S.cargas.filter(c=>c.status==="preparada");
   if (pend.length) alerts.push(["warn", `<b>${pend.length} carga(s) sem registro do ciclo</b> (${pend.map(c=>esc(c.lote)).join(", ")}). Registre parâmetros e resultado do pacote teste <span class="art">art. 91</span>`, `<button class="small" data-open="${esc(pend[0].lote)}">Registrar</button>`]);
+  const semFoto = S.cargas.filter(c=>c.ciclo && c.status!=="cancelada" && (!c.ciclo.fotos?.integrador || (c.ciclo.ib?.usado && c.ciclo.ib.resultado!=="pendente" && !c.ciclo.fotos?.ib)));
+  if (semFoto.length) alerts.push(["warn", `<b>${semFoto.length} carga(s) sem foto dos indicadores</b> (${semFoto.map(c=>esc(c.lote)).join(", ")}). Abra a carga, use “Corrigir registro” e anexe a foto.`, `<button class="small" data-open="${esc(semFoto[0].lote)}">Abrir carga</button>`]);
   const ibp = S.cargas.filter(c=>c.status==="liberada_ib");
   if (ibp.length) alerts.push(["warn", `<b>Indicador biológico em leitura</b> em ${ibp.map(c=>esc(c.lote)).join(", ")}. Lance o resultado ao fim da incubação.`, `<button class="small" data-open="${esc(ibp[0].lote)}">Lançar IB</button>`]);
   const rep = S.cargas.filter(c=>c.status==="reprovada" && (c.pacotes||[]).some(p=>!(c.usos||{})[p.codigo]));
@@ -501,7 +510,7 @@ function updCargaDetail(){
   box.innerHTML = `<div class="stack">
     <div class="row between"><div><div class="eyebrow">Lote da carga</div><h1 class="mono">${esc(c.lote)}</h1>
       <p class="lede">${br(c.data)} · ${esc(c.equipamentoNome)} · operador ${esc(c.operadorNome)} · validade ${br(c.validade)}</p></div>${cargaPill(c)}</div>
-    ${c.status==="preparada"?`<div class="alert info"><div class="grow"><b>Próximos passos:</b> 1) baixe e cole as etiquetas na face plástica de cada pacote <span class="art">art. 79 §2º</span>; 2) monte a carga com o pacote teste; 3) após o ciclo, registre parâmetros e resultado.</div></div>`:""}
+    ${c.status==="preparada"?`<div class="alert info"><div class="grow"><b>Próximos passos:</b> 1) baixe e cole as etiquetas na face plástica de cada pacote <span class="art">art. 79 §2º</span>; 2) monte a carga com o pacote teste; 3) após o ciclo, registre parâmetros e resultado, com a foto do integrador.</div></div>`:""}
     ${c.status==="reprovada"?`<div class="alert crit"><div class="grow"><b>Carga reprovada.</b> Nenhum pacote deste lote pode ser usado. Recolha todos, registre como "Devolvido para reprocessamento" e verifique se algum já foi usado em paciente (lista abaixo).</div></div>`:""}
     <section class="panel stack"><div class="row between"><h2>Etiquetas (${(c.pacotes||[]).length})</h2>
       <div class="row"><label class="f" style="min-width:220px">Formato<select id="lblFmt">
@@ -511,12 +520,13 @@ function updCargaDetail(){
       <p class="hint" style="margin:0">Use etiqueta própria para autoclave, que resista ao vapor e permaneça legível até o uso <span class="art">art. 80</span>. A data de validade segue o prazo configurado (padrão 6 meses, art. 82 §1º).</p></section>
     <section class="panel stack"><div class="row between"><h2>Registro do ciclo e monitoramento</h2>
       ${c.status!=="cancelada"?`<button class="${ci?"":"primary"}" data-act="ciclo">${ci?(c.status==="liberada_ib"?"Lançar resultado do IB":"Corrigir registro"):"Registrar ciclo"}</button>`:""}</div>
-      <div id="cicloBox">${ci?cicloKV(c):`<p class="muted" style="margin:0">Ainda não registrado. Faça após o término do ciclo, com a leitura do integrador químico do pacote teste.</p>`}</div></section>
+      <div id="cicloBox">${ci?cicloKV(c):`<p class="muted" style="margin:0">Ainda não registrado. Faça após o término do ciclo, com a leitura e a foto do integrador químico do pacote teste.</p>`}</div></section>
     <section class="stack"><h2>Pacotes e destino</h2>${pkgTableCarga(c)}</section>
     ${c.status==="preparada"?`<div class="row"><button data-act="editCarga">Editar carga</button><button class="danger" data-act="askCancel">Cancelar carga</button></div><div id="cancelBox"></div>`:""}
   </div>`;
   drawLabelPreview(c);
   $("#lblFmt").addEventListener("change", ()=>drawLabelPreview(c));
+  if (ci) mostrarThumbs(c);
 }
 function pkgTableCarga(c){
   return `<div class="tablewrap"><table><thead><tr><th>Código</th><th>Kit / itens</th><th>Preparado por</th><th>Embalagem</th><th>Situação</th><th>Uso</th></tr></thead><tbody>${
@@ -532,14 +542,52 @@ function cicloKV(c){ const ci = c.ciclo, ib = ci.ib||{};
     <dt>Integrador químico</dt><dd>Tipo ${esc(ci.integrador?.tipo)} · ${esc(RES[ci.integrador?.resultado]||"—")}</dd>
     <dt>Indicador biológico</dt><dd>${ib.usado?`${esc(RES[ib.resultado])}${ib.loteIB?` · lote IB ${esc(ib.loteIB)}`:""}${ib.leitura?` · leitura ${esc(ib.leitura)}`:""}${ib.controle?` · controle positivo: ${ib.controle==="ok"?"cresceu (válido)":"não cresceu (teste inválido)"}`:""}`:"Não incluído neste ciclo"}</dd>
     <dt>Interpretação</dt><dd>${esc(ci.interpretacao||"—")}</dd>
-    <dt>Registrado por</dt><dd>${esc(ci.registradoPor||c.operadorNome)} em ${esc((ci.registradoEm||"").slice(0,16).replace("T"," "))}</dd></dl>`; }
+    <dt>Registrado por</dt><dd>${esc(ci.registradoPor||c.operadorNome)} em ${esc((ci.registradoEm||"").slice(0,16).replace("T"," "))}</dd>
+    <dt>Fotos</dt><dd>${fotosCarga(c).length?`<div class="thumbs" id="thumbs-${esc(c.lote)}"><span class="hint">Carregando fotos…</span></div>`:`<span class="pill crit">Sem foto</span>`}${ib.usado && ib.resultado!=="pendente" && !ci.fotos?.ib?` <span class="pill crit">Falta a foto do IB</span>`:""}</dd></dl>`; }
+
+/* ---------- fotos dos indicadores ---------- */
+const agoraBR = () => { const d = new Date(); return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+function carregarImagem(file){ return new Promise((ok, falha) => { const u = URL.createObjectURL(file), im = new Image();
+  im.onload = () => { ok(im); setTimeout(()=>URL.revokeObjectURL(u), 1000); }; im.onerror = () => { URL.revokeObjectURL(u); falha(new Error("formato")); }; im.src = u; }); }
+/* Reduz a foto e grava o carimbo (lote, teste, resultado, data e hora) numa faixa escura embaixo. */
+async function carimbarFoto(file, linhas){
+  let im; try { im = await carregarImagem(file); } catch(_) { throw new Error("Não foi possível abrir a imagem. Use uma foto JPG ou PNG."); }
+  const k = Math.min(1, 1280 / Math.max(im.naturalWidth, im.naturalHeight)), w = Math.round(im.naturalWidth*k), h = Math.round(im.naturalHeight*k);
+  const cv = document.createElement("canvas"); cv.width = w; cv.height = h; const g = cv.getContext("2d");
+  g.drawImage(im, 0, 0, w, h);
+  const fs = Math.max(14, Math.round(Math.min(w, h*1.33) / 36)), lh = Math.round(fs*1.35), bh = lh*linhas.length + Math.round(fs*0.8);
+  g.fillStyle = "rgba(0,0,0,.68)"; g.fillRect(0, h-bh, w, bh); g.fillStyle = "#fff"; g.textBaseline = "top";
+  linhas.forEach((t,i) => { let f = fs; do { g.font = `${i?400:700} ${f}px Arial, Helvetica, sans-serif`; } while (g.measureText(t).width > w - fs && --f > 9);
+    g.fillText(t, Math.round(fs/2), h - bh + Math.round(fs*0.4) + i*lh); });
+  return cv.toDataURL("image/jpeg", 0.8);
+}
+const FOTO_INFO = {
+  integrador:{titulo:"Foto do integrador químico", dica:"Fotografe o integrador logo após o ciclo, com a janela de leitura bem visível."},
+  ib:{titulo:"Foto do indicador biológico", dica:"Fotografe as duas ampolas lado a lado (testada e controle), com as etiquetas e a cor visíveis."} };
+function fotoBox(tipo, atual){ const i = FOTO_INFO[tipo];
+  return `<div class="fotobox" data-fotobox="${tipo}"><div><b>${i.titulo} <span style="color:var(--crit)">*</span></b><div class="hint">${i.dica}</div></div>
+    <div class="row"><label class="btn">Tirar foto<input type="file" accept="image/*" capture="environment" data-foto-in="${tipo}"></label><label class="btn">Anexar arquivo<input type="file" accept="image/jpeg,image/png,image/webp,image/*" data-foto-in="${tipo}"></label></div>
+    <div class="prev" id="prev-${tipo}">${atual?`<span class="hint">Foto já registrada em ${esc(atual.em||"")}${atual.por?" por "+esc(atual.por):""}. Envie outra só se precisar substituir.</span>`:`<span class="hint">Nenhuma foto ainda.</span>`}</div></div>`; }
+function bindFotoInputs(){ document.querySelectorAll("[data-foto-in]").forEach(inp => inp.addEventListener("change", () => {
+  const f = inp.files && inp.files[0], tipo = inp.dataset.fotoIn; if (!f) return;
+  if (f.type && !/^image\//.test(f.type)) { toast("Envie uma imagem (foto JPG ou PNG)."); inp.value = ""; return; }
+  S.fotoNova[tipo] = f; const u = URL.createObjectURL(f);
+  $("#prev-"+tipo).innerHTML = `<img src="${u}" alt="Prévia da foto"><span class="hint">${esc(f.name||"foto")} · será carimbada e enviada ao salvar.</span>`; inp.value = ""; })); }
+async function buscarFotos(ids){ const faltam = [...new Set(ids)].filter(id => id && !S.fotoCache.has(id));
+  for (let i = 0; i < faltam.length; i += 6){ const r = await api("fotos", {ids: faltam.slice(i, i+6)}); Object.entries(r||{}).forEach(([k,v]) => S.fotoCache.set(k, v)); } }
+async function mostrarThumbs(c){ const el = document.getElementById("thumbs-"+c.lote); if (!el) return; const fs = fotosCarga(c); if (!fs.length) return;
+  try { await buscarFotos(fs.map(f=>f.id)); } catch(_) { el.innerHTML = `<span class="hint">Não foi possível carregar as fotos agora.</span>`; return; }
+  if (!document.body.contains(el)) return;
+  el.innerHTML = fotosCarga(c).map(f => `<figure>${f.src?`<img src="${f.src}" alt="${esc(f.titulo)}" data-zoom>`:`<span class="hint">Foto indisponível</span>`}<figcaption>${esc(f.tipo==="ib"?"Indicador biológico":f.titulo)} · ${esc(f.em||"")}</figcaption></figure>`).join(""); }
+document.addEventListener("click", e => { const im = e.target.closest("img[data-zoom]"); if (im) im.classList.toggle("big"); });
 
 function openCiclo(){
-  const c = curCarga(); if (!c) return; S.cicloOpen = true; const ci = c.ciclo || {}; const ib = ci.ib||{};
+  const c = curCarga(); if (!c) return; S.cicloOpen = true; S.fotoNova = {}; const ci = c.ciclo || {}; const ib = ci.ib||{};
   const wk = weekStart(c.data), primeiroSemana = !S.cargas.some(x=>x.lote!==c.lote && x.data>=wk && x.data<=c.data && x.ciclo && x.status!=="cancelada" && (x.data<c.data || x.lote<c.lote));
   const primeiroDia = !S.cargas.some(x=>x.lote!==c.lote && x.data===c.data && x.equipamentoId===c.equipamentoId && x.ciclo && x.lote<c.lote);
   const bdDefault = ci.bowieDick || (c.equipamentoVacuo && primeiroDia ? "" : "na");
   $("#cicloBox").innerHTML = `<form id="cicloForm" class="stack" novalidate>
+    ${(S.servidorVersao||1) < 2 ? `<div class="alert crit"><div class="grow"><b>Servidor desatualizado.</b> A planilha ainda não está preparada para guardar as fotos dos indicadores. Avise o responsável antes de registrar ciclos.</div></div>` : ""}
     ${primeiroSemana && !ci.integrador?`<div class="alert warn"><div class="grow">Este é o primeiro ciclo registrado na semana: o pacote teste deve conter <b>indicador biológico + integrador tipo 5 ou 6</b>, em embalagem dupla de papel grau cirúrgico <span class="art">art. 89</span></div></div>`:""}
     <div class="grid g4">
       <label class="f">Programa / ciclo<input id="kProg" value="${esc(ci.programa||"")}" placeholder="Ex.: Instrumental embalado 134 °C"></label>
@@ -558,20 +606,22 @@ function openCiclo(){
       <label class="f">Integrador químico<select id="kIntT"><option value="5" ${ci.integrador?.tipo!=6?"selected":""}>Tipo 5</option><option value="6" ${ci.integrador?.tipo==6?"selected":""}>Tipo 6</option></select></label>
       <label class="f">Resultado do integrador<select id="kIntR">${["","aprovado","reprovado"].map(v=>`<option value="${v}" ${v===(ci.integrador?.resultado||"")?"selected":""}>${v?RES[v]:"Selecione…"}</option>`).join("")}</select></label>
     </div>
+    <div style="margin-top:12px">${fotoBox("integrador", ci.fotos?.integrador)}</div>
     <div style="margin-top:12px"><label class="row" style="gap:8px;font-weight:500"><input type="checkbox" id="kIB" style="width:auto" ${ib.usado||(!ci.integrador&&primeiroSemana)?"checked":""}> Indicador biológico incluído neste ciclo</label></div>
     <div class="grid g4" id="ibFields" style="margin-top:10px">
-      <label class="f">Lote do IB<input id="kIBL" value="${esc(ib.loteIB||"")}"></label>
+      <label class="f">Lote do IB <span style="color:var(--crit)">*</span><input id="kIBL" value="${esc(ib.loteIB||"")}" required></label>
       <label class="f">Resultado do IB<select id="kIBR">${["pendente","negativo","positivo"].map(v=>`<option value="${v}" ${v===(ib.resultado||"pendente")?"selected":""}>${RES[v]}</option>`).join("")}</select></label>
       <label class="f">Controle positivo<select id="kIBC"><option value="">—</option><option value="ok" ${ib.controle==="ok"?"selected":""}>Cresceu (válido)</option><option value="falha" ${ib.controle==="falha"?"selected":""}>Não cresceu (inválido)</option></select></label>
       <label class="f">Data/hora da leitura<input id="kIBD" type="datetime-local" value="${esc(ib.leitura||"")}"></label>
-    </div></fieldset>
+    </div>
+    <div id="ibFoto" style="margin-top:10px">${fotoBox("ib", ci.fotos?.ib)}<p class="hint" style="margin:6px 0 0">Obrigatória ao lançar o resultado do IB (negativo ou positivo). Enquanto estiver em incubação, pode salvar sem ela.</p></div></fieldset>
     <div class="grid g2">
       <label class="f">Interpretação<textarea id="kInt" placeholder="Ex.: Parâmetros dentro do especificado, integrador virou. Carga liberada.">${esc(ci.interpretacao||"")}</textarea></label>
       <label class="f">Registrado por<select id="kReg">${optList(S.pessoas.filter(p=>p.ativo!==false), S.pessoas.find(p=>p.nome===ci.registradoPor)?.id || c.operadorId, "Selecione…")}</select></label>
     </div>
     <div id="kErr"></div>
     <div class="row"><button type="submit" class="primary">Salvar registro</button><button type="button" data-act="cancelCiclo">Cancelar</button></div></form>`;
-  const tog = () => { $("#ibFields").hidden = !$("#kIB").checked; }; tog(); $("#kIB").addEventListener("change", tog);
+  const tog = () => { $("#ibFields").hidden = $("#ibFoto").hidden = !$("#kIB").checked; }; tog(); $("#kIB").addEventListener("change", tog); bindFotoInputs();
   $("#cicloForm").addEventListener("submit", e=>{ e.preventDefault(); salvarCiclo(); });
 }
 async function salvarCiclo(){
@@ -586,14 +636,33 @@ async function salvarCiclo(){
   if (!ciclo.bowieDick) errs.push("Informe o Bowie & Dick (ou “Não se aplica”).");
   if (!v("#kReg")) errs.push("Informe quem está registrando.");
   if (ciclo.ib.usado && ciclo.ib.resultado!=="pendente" && ciclo.ib.controle==="falha") errs.push("Controle positivo não cresceu: o teste é inválido. Repita o IB antes de lançar o resultado.");
+  const fotosAtuais = (c.ciclo||{}).fotos || {};
+  if (ciclo.ib.usado && !ciclo.ib.loteIB) errs.push("Informe o lote do indicador biológico.");
+  if (!S.fotoNova.integrador && !fotosAtuais.integrador) errs.push("Tire ou anexe a foto do integrador químico.");
+  if (ciclo.ib.usado && ciclo.ib.resultado!=="pendente" && !S.fotoNova.ib && !fotosAtuais.ib) errs.push("Tire ou anexe a foto das ampolas do indicador biológico (testada e controle).");
+  if ((S.servidorVersao||1) < 2) errs.push("O servidor da planilha ainda não está preparado para guardar fotos. Avise o responsável.");
   if (errs.length){ $("#kErr").innerHTML = `<div class="alert crit"><div class="grow">${errs.map(esc).join("<br>")}</div></div>`; return; }
-  if (!ciclo.interpretacao){ const st = computeStatus(ciclo);
-    ciclo.interpretacao = st==="reprovada" ? "Falha no monitoramento. Carga reprovada; pacotes recolhidos para reprocessamento." :
-      st==="liberada_ib" ? "Parâmetros e integrador conformes. Carga liberada; indicador biológico em incubação." : "Parâmetros físicos e indicadores conformes. Carga liberada."; }
-  const status = computeStatus(ciclo);
-  const ok = await write(async()=>{ const r = await api("update",{col:"cargas", id:c.lote, dados:{ciclo, status, liberadoEm: status.startsWith("liberada")?(c.liberadoEm||ciclo.registradoEm):null}}); upsertLocal(r); return r; },
+  const INTERP_AUTO = {reprovada:"Falha no monitoramento. Carga reprovada; pacotes recolhidos para reprocessamento.",
+    liberada_ib:"Parâmetros e integrador conformes. Carga liberada; indicador biológico em incubação.", liberada:"Parâmetros físicos e indicadores conformes. Carga liberada."};
+  // texto automático acompanha o resultado (ex.: ao lançar o IB); texto escrito pela equipe é mantido
+  if (!ciclo.interpretacao || Object.values(INTERP_AUTO).includes(ciclo.interpretacao)) ciclo.interpretacao = INTERP_AUTO[computeStatus(ciclo)] || ciclo.interpretacao;
+  const status = computeStatus(ciclo), quando = agoraBR(), por = ciclo.registradoPor, novas = [];
+  try {
+    for (const tipo of ["integrador","ib"]){ const f = S.fotoNova[tipo]; if (!f || (tipo==="ib" && !ciclo.ib.usado)) continue;
+      const l1 = tipo==="integrador" ? `${c.lote} · Integrador químico T${ciclo.integrador.tipo} · ${RES[ciclo.integrador.resultado]}`
+        : `${c.lote} · Indicador biológico · ${RES[ciclo.ib.resultado]}${ciclo.ib.controle==="ok"?" · controle válido":""} · lote IB ${ciclo.ib.loteIB}`;
+      novas.push({tipo, dataUrl: await carimbarFoto(f, [l1, `Foto ${quando} · ${por} · Oroclin · Controle de esterilização`])}); }
+  } catch(e){ $("#kErr").innerHTML = `<div class="alert crit"><div class="grow">${esc(e.message)}</div></div>`; return; }
+  const btn = $("#cicloForm button[type=submit]"); btn.disabled = true; btn.textContent = novas.length ? "Enviando foto…" : "Salvando…";
+  const ok = await write(async()=>{
+    const fotos = {...fotosAtuais};
+    for (const n of novas){ const r = await api("foto", {dados:{lote:c.lote, tipo:n.tipo, dataUrl:n.dataUrl, por}}); fotos[n.tipo] = {id:r.id, nome:r.nome, em:quando, por}; S.fotoCache.set(r.id, n.dataUrl); }
+    if (!ciclo.ib.usado) fotos.ib = null;
+    ciclo.fotos = fotos;
+    const r = await api("update",{col:"cargas", id:c.lote, dados:{ciclo, status, liberadoEm: status.startsWith("liberada")?(c.liberadoEm||ciclo.registradoEm):null}}); upsertLocal(r); return r; },
     status==="reprovada" ? "Carga marcada como reprovada." : "Registro do ciclo salvo.");
-  if (ok){ S.cicloOpen = false; updCargaDetail(); }
+  if (ok){ S.cicloOpen = false; S.fotoNova = {}; updCargaDetail(); }
+  else if (document.body.contains(btn)){ btn.disabled = false; btn.textContent = "Salvar registro"; }
 }
 
 /* ---------- etiquetas ---------- */
@@ -787,18 +856,22 @@ function regRecords(){ return regFiltered().map(c=>{ const ci=c.ciclo||{}; retur
   ciclo:`${ci.programa||""} ${ci.horaInicio||""}-${ci.horaFim||""}`.trim(),
   teste: ci.integrador?`${ci.bowieDick && ci.bowieDick!=="na"?`B&D: ${RES[ci.bowieDick]}; `:""}Integrador T${ci.integrador.tipo}: ${RES[ci.integrador.resultado]}; IB: ${ci.ib?.usado?RES[ci.ib.resultado]+(ci.ib.loteIB?" (lote "+ci.ib.loteIB+")":""):"não incluído"}`:"Sem registro",
   interpretacao: ci.interpretacao||"", pacotes:(c.pacotes||[]).map(p=>`${p.codigo.split("-").pop()} ${p.kit} (prep. ${p.preparadoPor})`).join("; "),
-  situacao:(CARGA_STATUS[c.status]||[c.status])[0] }; }); }
+  situacao:(CARGA_STATUS[c.status]||[c.status])[0], fotos:[ci.fotos?.integrador?.nome, ci.fotos?.ib?.nome].filter(Boolean).join("; ") || "sem foto" }; }); }
 function regCsv(){ const r = regRecords(); if (!r.length) return toast("Nenhuma carga no período.");
-  const head = ["Data","Lote","Equipamento","Operador","Parâmetros físicos","Ciclo","Resultado do pacote teste","Interpretação","Pacotes esterilizados","Situação"];
+  const head = ["Data","Lote","Equipamento","Operador","Parâmetros físicos","Ciclo","Resultado do pacote teste","Interpretação","Pacotes esterilizados","Situação","Fotos dos indicadores (Drive)"];
   const q = v => `"${String(v).replace(/"/g,'""')}"`;
-  const csv = "﻿" + [head.map(q).join(";"), ...r.map(x=>[x.data,x.lote,x.equipamento,x.operador,x.parametros,x.ciclo,x.teste,x.interpretacao,x.pacotes,x.situacao].map(q).join(";"))].join("\r\n");
+  const csv = "﻿" + [head.map(q).join(";"), ...r.map(x=>[x.data,x.lote,x.equipamento,x.operador,x.parametros,x.ciclo,x.teste,x.interpretacao,x.pacotes,x.situacao,x.fotos].map(q).join(";"))].join("\r\n");
   save(`registro_esterilizacao_${S.regMes}.csv`, csv); }
 /* Fotos dos indicadores de uma carga, na ordem em que entram no anexo. */
-function fotosCarga(c){ const f = (c.ciclo||{}).fotos || {}, ci = c.ciclo || {}, out = [];
-  if (f.integrador) out.push({...f.integrador, tipo:"integrador", titulo:`Integrador químico T${ci.integrador?.tipo||""}`, resultado:RES[ci.integrador?.resultado]||"—"});
-  if (f.ib) out.push({...f.ib, tipo:"ib", titulo:"Indicador biológico · testado e controle", resultado:`${RES[ci.ib?.resultado]||"—"}${ci.ib?.controle==="ok"?" · controle válido":""}${ci.ib?.loteIB?" · lote IB "+ci.ib.loteIB:""}`});
+function fotosCarga(c){ const f = (c.ciclo||{}).fotos || {}, ci = c.ciclo || {}, out = [], src = x => x.src || S.fotoCache.get(x.id) || null;
+  if (f.integrador) out.push({...f.integrador, src:src(f.integrador), tipo:"integrador", titulo:`Integrador químico T${ci.integrador?.tipo||""}`, resultado:RES[ci.integrador?.resultado]||"—"});
+  if (f.ib) out.push({...f.ib, src:src(f.ib), tipo:"ib", titulo:"Indicador biológico · testado e controle", resultado:`${RES[ci.ib?.resultado]||"—"}${ci.ib?.controle==="ok"?" · controle válido":""}${ci.ib?.loteIB?" · lote IB "+ci.ib.loteIB:""}`});
   return out; }
-function regPdf(){ const r = regRecords(); if (!r.length) return toast("Nenhuma carga no período.");
+async function regPdf(){ const r = regRecords(); if (!r.length) return toast("Nenhuma carga no período.");
+  const ids = r.flatMap(x => fotosCarga(x._c).filter(f => !f.src && f.id).map(f => f.id)), bt = document.querySelector("[data-act=regPdf]");
+  if (ids.length){ if (bt){ bt.disabled = true; bt.textContent = `Baixando ${ids.length} foto(s)…`; }
+    try { await buscarFotos(ids); } catch(e){ toast("Não foi possível baixar as fotos do Drive. Confira a conexão e tente de novo."); return; }
+    finally { if (bt){ bt.disabled = false; bt.textContent = "Baixar livro do mês (PDF)"; } } }
   const { jsPDF } = window.jspdf; const doc = new jsPDF({unit:"mm", format:"a4", orientation:"landscape"});
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 12, base = H - 14;
   const head = [["Data","Lote","Equipamento","Operador","Parâmetros físicos","Resultado e interpretação do pacote teste","Pacotes esterilizados","Situação"]];
