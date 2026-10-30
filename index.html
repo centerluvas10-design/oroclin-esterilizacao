@@ -109,6 +109,10 @@ label.btn input[type=file]{display:none}
 .thumbs{display:flex;gap:12px;flex-wrap:wrap}
 .thumbs figure{margin:0;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
 .thumbs img{cursor:zoom-in} .thumbs img.big{width:min(100%,640px);cursor:zoom-out}
+.fotobox img.fotoprev{width:min(100%,520px);cursor:zoom-in} .fotobox img.fotoprev.big{width:100%;cursor:zoom-out}
+.fotobox img.fotoprev.ok{width:min(100%,220px)}
+.fotobox .conferir{display:flex;flex-direction:column;gap:8px;width:100%}
+.fotobox.pendente{border-style:solid;border-color:var(--warn);background:var(--warn-soft)}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);font-weight:500;min-width:0}
 input,select,textarea{font:400 14.5px var(--f-body);color:var(--fg);background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;padding:8px 10px;width:100%;min-width:0}
@@ -571,15 +575,31 @@ function fotoBox(tipo, atual){ const i = FOTO_INFO[tipo];
 function bindFotoInputs(){ document.querySelectorAll("[data-foto-in]").forEach(inp => inp.addEventListener("change", () => {
   const f = inp.files && inp.files[0], tipo = inp.dataset.fotoIn; if (!f) return;
   if (f.type && !/^image\//.test(f.type)) { toast("Envie uma imagem (foto JPG ou PNG)."); inp.value = ""; return; }
-  S.fotoNova[tipo] = f; const u = URL.createObjectURL(f);
-  $("#prev-"+tipo).innerHTML = `<img src="${u}" alt="Prévia da foto"><span class="hint">${esc(f.name||"foto")} · será carimbada e enviada ao salvar.</span>`; inp.value = ""; })); }
+  S.fotoNova[tipo] = {file:f, ok:false}; inp.value = ""; desenharConferencia(tipo); })); }
+/* Mostra a foto grande para a equipe conferir se a leitura está nítida antes de salvar. */
+function desenharConferencia(tipo){
+  const n = S.fotoNova[tipo], box = document.querySelector(`[data-fotobox="${tipo}"]`), el = $("#prev-"+tipo); if (!n || !el) return;
+  if (n.url) URL.revokeObjectURL(n.url); n.url = URL.createObjectURL(n.file);
+  box.classList.toggle("pendente", !n.ok);
+  el.innerHTML = n.ok
+    ? `<img class="fotoprev ok" src="${n.url}" alt="Foto conferida" data-zoom><span class="hint"><b style="color:var(--ok)">✓ Foto conferida.</b> Será carimbada e enviada ao salvar. Para trocar, use “Tirar foto” ou “Anexar arquivo”.</span>`
+    : `<div class="conferir"><b>Confira a foto antes de salvar</b>
+        <span class="hint">${tipo==="integrador" ? "A janela de leitura do integrador precisa estar nítida, sem reflexo e inteira na foto." : "As duas ampolas, as etiquetas e a cor do meio precisam estar nítidas na foto."} Toque na foto para ampliar.</span>
+        <img class="fotoprev" src="${n.url}" alt="Foto para conferir" data-zoom>
+        <div class="row"><button type="button" class="primary small" data-foto-ok="${tipo}">Foto legível, usar esta</button><button type="button" class="small" data-foto-outra="${tipo}">Tirar outra foto</button><button type="button" class="small" data-foto-arquivo="${tipo}">Anexar outro arquivo</button></div></div>`;
+}
 async function buscarFotos(ids){ const faltam = [...new Set(ids)].filter(id => id && !S.fotoCache.has(id));
   for (let i = 0; i < faltam.length; i += 6){ const r = await api("fotos", {ids: faltam.slice(i, i+6)}); Object.entries(r||{}).forEach(([k,v]) => S.fotoCache.set(k, v)); } }
 async function mostrarThumbs(c){ const el = document.getElementById("thumbs-"+c.lote); if (!el) return; const fs = fotosCarga(c); if (!fs.length) return;
   try { await buscarFotos(fs.map(f=>f.id)); } catch(_) { el.innerHTML = `<span class="hint">Não foi possível carregar as fotos agora.</span>`; return; }
   if (!document.body.contains(el)) return;
   el.innerHTML = fotosCarga(c).map(f => `<figure>${f.src?`<img src="${f.src}" alt="${esc(f.titulo)}" data-zoom>`:`<span class="hint">Foto indisponível</span>`}<figcaption>${esc(f.tipo==="ib"?"Indicador biológico":f.titulo)} · ${esc(f.em||"")}</figcaption></figure>`).join(""); }
-document.addEventListener("click", e => { const im = e.target.closest("img[data-zoom]"); if (im) im.classList.toggle("big"); });
+document.addEventListener("click", e => {
+  const im = e.target.closest("img[data-zoom]"); if (im){ im.classList.toggle("big"); return; }
+  const ok = e.target.closest("[data-foto-ok]"); if (ok){ const t = ok.dataset.fotoOk; if (S.fotoNova[t]){ S.fotoNova[t].ok = true; desenharConferencia(t); } return; }
+  const outra = e.target.closest("[data-foto-outra],[data-foto-arquivo]");
+  if (outra){ const t = outra.dataset.fotoOutra || outra.dataset.fotoArquivo, cam = !!outra.dataset.fotoOutra;
+    const inp = document.querySelector(`[data-fotobox="${t}"] input[data-foto-in]${cam ? "[capture]" : ":not([capture])"}`); if (inp) inp.click(); } });
 
 function openCiclo(){
   const c = curCarga(); if (!c) return; S.cicloOpen = true; S.fotoNova = {}; const ci = c.ciclo || {}; const ib = ci.ib||{};
@@ -639,6 +659,8 @@ async function salvarCiclo(){
   const fotosAtuais = (c.ciclo||{}).fotos || {};
   if (ciclo.ib.usado && !ciclo.ib.loteIB) errs.push("Informe o lote do indicador biológico.");
   if (!S.fotoNova.integrador && !fotosAtuais.integrador) errs.push("Tire ou anexe a foto do integrador químico.");
+  if (S.fotoNova.integrador && !S.fotoNova.integrador.ok) errs.push("Confira a foto do integrador: toque em “Foto legível, usar esta” ou tire outra.");
+  if (ciclo.ib.usado && S.fotoNova.ib && !S.fotoNova.ib.ok) errs.push("Confira a foto do indicador biológico: toque em “Foto legível, usar esta” ou tire outra.");
   if (ciclo.ib.usado && ciclo.ib.resultado!=="pendente" && !S.fotoNova.ib && !fotosAtuais.ib) errs.push("Tire ou anexe a foto das ampolas do indicador biológico (testada e controle).");
   if ((S.servidorVersao||1) < 2) errs.push("O servidor da planilha ainda não está preparado para guardar fotos. Avise o responsável.");
   if (errs.length){ $("#kErr").innerHTML = `<div class="alert crit"><div class="grow">${errs.map(esc).join("<br>")}</div></div>`; return; }
@@ -648,7 +670,7 @@ async function salvarCiclo(){
   if (!ciclo.interpretacao || Object.values(INTERP_AUTO).includes(ciclo.interpretacao)) ciclo.interpretacao = INTERP_AUTO[computeStatus(ciclo)] || ciclo.interpretacao;
   const status = computeStatus(ciclo), quando = agoraBR(), por = ciclo.registradoPor, novas = [];
   try {
-    for (const tipo of ["integrador","ib"]){ const f = S.fotoNova[tipo]; if (!f || (tipo==="ib" && !ciclo.ib.usado)) continue;
+    for (const tipo of ["integrador","ib"]){ const f = S.fotoNova[tipo]?.file; if (!f || (tipo==="ib" && !ciclo.ib.usado)) continue;
       const l1 = tipo==="integrador" ? `${c.lote} · Integrador químico T${ciclo.integrador.tipo} · ${RES[ciclo.integrador.resultado]}`
         : `${c.lote} · Indicador biológico · ${RES[ciclo.ib.resultado]}${ciclo.ib.controle==="ok"?" · controle válido":""} · lote IB ${ciclo.ib.loteIB}`;
       novas.push({tipo, dataUrl: await carimbarFoto(f, [l1, `Foto ${quando} · ${por} · Oroclin · Controle de esterilização`])}); }
