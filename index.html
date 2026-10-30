@@ -818,9 +818,9 @@ function regPdf(){ const r = regRecords(); if (!r.length) return toast("Nenhuma 
   let y = cab(), topo = true;
   r.forEach(x => {
     const cells = [x.data,x.lote,x.equipamento,x.operador,x.parametros,x.teste+(x.interpretacao?"\n"+x.interpretacao:""),x.pacotes,x.situacao];
-    const fotos = fotosCarga(x._c), precisa = (topo ? 8 : 0) + rowH(cells) + (fotos.length ? FOTO_BLOCO : 9) + 4;
+    const fotos = fotosCarga(x._c), precisa = 8 + rowH(cells) + (fotos.length ? FOTO_BLOCO : 9) + 4;
     if (!topo && y + precisa > base){ doc.addPage(); y = cab(); topo = true; }
-    doc.autoTable({ startY:y, margin:{left:M, right:M}, head: topo ? head : undefined, showHead: topo ? "firstPage" : "never", body:[cells], styles:style,
+    doc.autoTable({ startY:y, margin:{left:M, right:M}, head, showHead:"firstPage", body:[cells], styles:style,
       headStyles:{fillColor:[23,21,15], textColor:255}, bodyStyles:{fillColor:[247,245,239]}, columnStyles:colStyles,
       didParseCell:d=>{ if (d.section==="body" && d.column.index===7 && /Reprovada/.test(d.cell.raw)) { d.cell.styles.textColor=[180,30,30]; d.cell.styles.fontStyle="bold"; } } });
     y = doc.lastAutoTable.finalY; topo = false;
