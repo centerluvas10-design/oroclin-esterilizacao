@@ -800,37 +800,50 @@ function fotosCarga(c){ const f = (c.ciclo||{}).fotos || {}, ci = c.ciclo || {},
   return out; }
 function regPdf(){ const r = regRecords(); if (!r.length) return toast("Nenhuma carga no período.");
   const { jsPDF } = window.jspdf; const doc = new jsPDF({unit:"mm", format:"a4", orientation:"landscape"});
-  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
-  // numera as figuras antes de desenhar a tabela, para a coluna "Anexo" já sair com os números
-  let n = 0; const figs = []; r.forEach(x => { x.figs = fotosCarga(x._c).map(f => { const fig = {...f, n:++n, lote:x.lote, data:x.data}; figs.push(fig); return fig; }); });
-  const cab = (titulo) => { const lg = pdfLogo(doc, 12, 5, 13);
-    doc.setFont("helvetica","bold"); doc.setFontSize(13); doc.setTextColor(0); doc.text(titulo, 12 + lg + 5, 15);
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 12, base = H - 14;
+  const head = [["Data","Lote","Equipamento","Operador","Parâmetros físicos","Resultado e interpretação do pacote teste","Pacotes esterilizados","Situação"]];
+  // larguras fixas: a mesma grade em todas as cargas, para o livro ler como uma tabela só
+  const cw = {0:19, 1:27, 2:23, 3:22, 4:30, 5:66, 6:66, 7:20};
+  const colStyles = Object.fromEntries(Object.entries(cw).map(([k,w])=>[k,{cellWidth:w}])); colStyles[1].font = "courier";
+  const style = {fontSize:7, cellPadding:1.6, valign:"top", lineColor:[200,200,200], lineWidth:0.15};
+  const cab = () => { const lg = pdfLogo(doc, M, 5, 13);
+    doc.setFont("helvetica","bold"); doc.setFontSize(13); doc.setTextColor(0); doc.text("Registro de monitoramento da esterilização", M + lg + 5, 15);
     doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(90);
-    doc.text(`Período: ${S.regMes.split("-").reverse().join("/")} · ${S.regEquip?"Autoclave: "+(S.equip.find(e=>e.id===S.regEquip)?.nome||""):"Todas as autoclaves"} · RDC Anvisa nº 1.002/2025, arts. 89 a 92 · emitido em ${new Date().toLocaleString("pt-BR")}`, 12, 21); doc.setTextColor(0); };
-  cab("Registro de monitoramento da esterilização");
-  doc.autoTable({ startY:26, head:[["Data","Lote","Equipamento","Operador","Parâmetros físicos","Resultado e interpretação do pacote teste","Pacotes esterilizados","Situação","Anexo"]],
-    body:r.map(x=>[x.data,x.lote,x.equipamento,x.operador,x.parametros,x.teste+(x.interpretacao?"\n"+x.interpretacao:""),x.pacotes,x.situacao, x.figs.length ? x.figs.map(f=>"Fig. "+f.n).join("\n") : "Sem foto"]),
-    styles:{fontSize:7, cellPadding:1.6, valign:"top"}, headStyles:{fillColor:[23,21,15], textColor:255}, columnStyles:{1:{font:"courier"},5:{cellWidth:58},6:{cellWidth:64},8:{cellWidth:15, fontStyle:"bold"}},
-    didParseCell:d=>{ if (d.section==="body" && d.column.index===8 && d.cell.raw==="Sem foto") d.cell.styles.textColor=[180,30,30]; } });
-  // anexo fotográfico: 6 fotos por página (3 × 2), legenda abaixo de cada uma
-  if (figs.length){
-    const cols = 3, rows = 2, gx = 8, x0 = 12, top = 30, cw = (W - 2*x0 - (cols-1)*gx)/cols, ih = cw*0.75, cap = 15;
-    figs.forEach((f, i) => { const k = i % (cols*rows);
-      if (k === 0){ doc.addPage(); cab("Anexo fotográfico · indicadores do pacote teste");
-        doc.setFontSize(8); doc.setTextColor(90); doc.text("Fotos tiradas no sistema no momento da leitura, com lote, data e hora gravados na imagem. A figura de cada carga está indicada na coluna “Anexo” do registro.", 12, 26); doc.setTextColor(0); }
-      const cx = x0 + (k % cols)*(cw + gx), cy = top + Math.floor(k / cols)*(ih + cap + 6);
-      doc.setDrawColor(170); doc.setLineWidth(0.2); doc.rect(cx, cy, cw, ih);
-      try { doc.addImage(f.src, "JPEG", cx+0.3, cy+0.3, cw-0.6, ih-0.6, undefined, "FAST"); } catch(_) { doc.setFontSize(8); doc.text("Foto indisponível", cx+cw/2, cy+ih/2, {align:"center"}); }
-      let ty = cy + ih + 4.2;
-      doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.text(`Fig. ${f.n}  ·  ${f.lote}  ·  ${f.data}`, cx, ty);
-      doc.setFont("helvetica","normal"); doc.setFontSize(7.5); ty += 3.8;
-      const linhas = doc.splitTextToSize(`${f.titulo}: ${f.resultado}`, cw); doc.text(linhas, cx, ty); ty += 3.4 * linhas.length;
-      doc.setTextColor(110); doc.text(`Foto em ${f.em||"—"}${f.por?" por "+f.por:""}`, cx, ty); doc.setTextColor(0); });
-  }
+    doc.text(`Período: ${S.regMes.split("-").reverse().join("/")} · ${S.regEquip?"Autoclave: "+(S.equip.find(e=>e.id===S.regEquip)?.nome||""):"Todas as autoclaves"} · RDC Anvisa nº 1.002/2025, arts. 89 a 92 · emitido em ${new Date().toLocaleString("pt-BR")}`, M, 21);
+    doc.setTextColor(0); return 25; };
+  // altura de uma linha da tabela, calculada antes de desenhar, para decidir a quebra de página
+  const rowH = cells => { doc.setFont("helvetica","normal"); doc.setFontSize(7); let n = 1;
+    cells.forEach((t,i)=>{ n = Math.max(n, doc.splitTextToSize(String(t), cw[i] - 3.2).length); }); return n * 7 * 0.3528 * 1.15 + 3.4; };
+  const PH = 46, PW = PH * 4/3, CAP = 62, FOTO_BLOCO = PH + 5;   // foto 61 × 46 mm, legenda ao lado
+  let y = cab(), topo = true;
+  r.forEach(x => {
+    const cells = [x.data,x.lote,x.equipamento,x.operador,x.parametros,x.teste+(x.interpretacao?"\n"+x.interpretacao:""),x.pacotes,x.situacao];
+    const fotos = fotosCarga(x._c), precisa = (topo ? 8 : 0) + rowH(cells) + (fotos.length ? FOTO_BLOCO : 9) + 4;
+    if (!topo && y + precisa > base){ doc.addPage(); y = cab(); topo = true; }
+    doc.autoTable({ startY:y, margin:{left:M, right:M}, head: topo ? head : undefined, showHead: topo ? "firstPage" : "never", body:[cells], styles:style,
+      headStyles:{fillColor:[23,21,15], textColor:255}, bodyStyles:{fillColor:[247,245,239]}, columnStyles:colStyles,
+      didParseCell:d=>{ if (d.section==="body" && d.column.index===7 && /Reprovada/.test(d.cell.raw)) { d.cell.styles.textColor=[180,30,30]; d.cell.styles.fontStyle="bold"; } } });
+    y = doc.lastAutoTable.finalY; topo = false;
+    // faixa das fotos, presa à linha da carga
+    const h = fotos.length ? FOTO_BLOCO : 9;
+    doc.setDrawColor(200); doc.setLineWidth(0.15); doc.rect(M, y, W - 2*M, h);
+    doc.setFillColor(190,160,90); doc.rect(M, y, 1.2, h, "F");
+    if (!fotos.length){ doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(180,30,30); doc.text("Sem foto dos indicadores registrada para esta carga.", M + 5, y + 5.8); doc.setTextColor(0); }
+    fotos.forEach((f, i) => { const fx = M + 4 + i * (PW + CAP + 6), fy = y + 2.5;
+      try { doc.addImage(f.src, "JPEG", fx, fy, PW, PH, undefined, "FAST"); } catch(_) { doc.setFontSize(8); doc.text("Foto indisponível", fx + PW/2, fy + PH/2, {align:"center"}); }
+      doc.setDrawColor(170); doc.rect(fx, fy, PW, PH);
+      let ty = fy + 4, tx = fx + PW + 4;
+      doc.setFont("helvetica","bold"); doc.setFontSize(8.5); doc.text(doc.splitTextToSize(f.tipo==="ib" ? "Indicador biológico" : f.titulo, CAP), tx, ty); ty += 4.5;
+      doc.setFont("helvetica","normal"); doc.setFontSize(7.5);
+      if (f.tipo==="ib"){ doc.text("Ampolas testada e controle", tx, ty); ty += 4; }
+      const res = doc.splitTextToSize("Resultado: " + f.resultado, CAP); doc.text(res, tx, ty); ty += 3.5 * res.length + 1.5;
+      doc.setTextColor(110); doc.text(doc.splitTextToSize(`Foto em ${f.em||"—"}${f.por?"\npor "+f.por:""}`, CAP), tx, ty); doc.setTextColor(0); });
+    y += h + 4;
+  });
   const tot = doc.internal.getNumberOfPages();
   for (let p = 1; p <= tot; p++){ doc.setPage(p); doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(120);
-    doc.text(`Página ${p} de ${tot}`, W-12, H-7, {align:"right"});
-    doc.text("Responsável técnico: ______________________________   Data: ___/___/______", 12, H-7); doc.setTextColor(0); }
+    doc.text(`Página ${p} de ${tot}`, W-M, H-7, {align:"right"});
+    doc.text("Responsável técnico: ______________________________   Data: ___/___/______", M, H-7); doc.setTextColor(0); }
   save(`livro_esterilizacao_${S.regMes}.pdf`, doc.output("blob")); }
 
 /* ======================= CADASTROS ======================= */
